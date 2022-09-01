@@ -1,0 +1,441 @@
+---
+title: "Survey Analysis"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## 1.Data Import
+
+Load the required packages for the analysis and import the raw data.
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(tidyr)
+library(emmeans)
+library(ggplot2)
+library(lme4)
+library(effects)
+library(car)
+library(sjPlot)
+library(glmmTMB)
+library(lmerTest)
+library(grf)
+library(rstatix)
+library(nFactors)
+library(FactoMineR)
+library(ggpubr)
+library(data.table)
+library(report)
+library(merDeriv)
+library(datawizard)
+
+options(scipen=999) # Prevent scientific notation printing
+
+library(readxl)
+dat <- read_xlsx("dat.xlsx")
+```
+ 
+Extract, rename and combine the variables to produce the final dataset. 
+ 
+```{r}
+temp0 <- dat %>% mutate(BFNE         = BFNE_1+BFNE_2+BFNE_3+BFNE_4+BFNE_5+BFNE_6+
+                                        BFNE_7+BFNE_8+BFNE_9+BFNE_10+BFNE_11+BFNE_12,
+                         PRCS         = PRCS_1+PRCS_2+PRCS_3+PRCS_4+PRCS_5+PRCS_6+
+                                        PRCS_7+PRCS_8+PRCS_9+PRCS_10+PRCS_11+PRCS_12,
+                         SSPS         = SSPSN_1+SSPSN_2+SSPSN_3+SSPSN_4+SSPSN_5)
+
+temp1 <- temp0 %>% select(Subject,Gender,Employment,Age,Education,
+                          LargeNeutralAudience_Classroom,MediumNeutralAudience_Classroom, SmallNeutralAudience_Classroom,
+                          LargeDisengagedAudience_Classroom,LargeEngagedAudience_Classroom,
+                          MediumDisengagedAudience_Classroom,
+                          MediumEngagedAudience_Classroom,SmallDisengagedAudience_Classroom,SmallEngagedAudience_Classroom,
+                          LargeDisengagedAudience_Lecture,LargeEngagedAudience_Lecture,
+                          MediumDisengagedAudience_Lecture,MediumEngagedAudience_Lecture,
+                          SmallDisengagedAudience_Lecture,
+                          SmallEngagedAudience_Lecture,LargeDisengagedAudience_InterviewRoom,
+                          LargeEngagedAudience_InterviewRoom,
+                          MediumDisengagedAudience_InterviewRoom,MediumEngagedAudience_InterviewRoom,
+                          SmallDisengagedAudience_InterviewRoom,
+                          SmallEngagedAudience_InterviewRoom,LargeNeutralAudience_Lecture,
+                          MediumNeutralAudience_Lecture,
+                          SmallNeutralAudience_Lecture,LargeNeutralAudience_InterviewRoom,MediumNeutralAudience_InterviewRoom,
+                          SmallNeutralAudience_InterviewRoom,BFNE,PRCS,SSPS)
+
+SurveyData <- temp1 %>% gather(key=var1, value="Score",- Subject, - Gender,- Employment,- Age, - Education,
+                               - BFNE, - PRCS, - SSPS)                                              %>%     
+                        mutate(Roomsize=ifelse(grepl("Class",var1),"Classroom", 
+                                               ifelse(grepl("Lecture",var1),"Lecture","InterviewRoom")))  %>%
+                        mutate(Audiencesize=ifelse(grepl("Large",var1),"Large", 
+                                                   ifelse(grepl("Medium",var1),"Medium","Small")))  %>% 
+                        mutate(Valence=ifelse(grepl("Engaged",var1),"Engaged",
+                                              ifelse(grepl("Disengaged",var1),"Disengaged","Neutral")))        %>%
+                        mutate(Roomsize=as.factor(Roomsize), Audiencesize=as.factor(Audiencesize), 
+                               Valence=as.factor(Valence))                                          %>% 
+                        select(-var1)
+
+SurveyData <- as.tibble(SurveyData)
+SurveyData$Roomsize <- factor(SurveyData$Roomsize, levels = c("InterviewRoom", "Classroom", "Lecture"))
+
+SurveyData$Valence <- factor(SurveyData$Valence, levels = c("Disengaged", "Neutral", "Engaged"))
+
+SurveyData$Audiencesize <- factor(SurveyData$Audiencesize, levels = c("Small", "Medium", "Large"))
+
+
+```
+
+Example of the final dataset for a single subject
+```{r}
+SurveyData[SurveyData$Subject==SurveyData$Subject[1],]
+
+describe(SurveyData)
+```
+
+
+## 2. Mixed-effects ANOVA 
+
+First set the default coding scheme to "sum" so that Type III tests are correctly calculated.
+```{r}
+options(contrasts=c("contr.sum","contr.poly"))
+```
+
+Next we fit the full factorial model of Audience x Room x Valence for the anxiety scores. We can only use a random-intercepts model as we have no repeats per-subject within each cell.
+```{r}
+mod.1 <- lmer(Score ~ Audiencesize * Roomsize * Valence + (1|Subject), data = SurveyData)
+
+
+```
+
+Check the assumptions before going any further.
+```{r}
+plot_model(mod.1, "diag")
+```
+
+The residuals demonstrate some heavy tails, but otherwise normality seems reasonably satisfied. The main issue is the striations in the fitted vs residuals plot, which is caused by the fact that the outcome variable has only a discrete set of possible values. It's possible a more complex method of analysing ordinal data would be more appropriate, but this comes with limitations in terms of our ability to test the model effects easily with existing packages. As such, we'll stick with the standard Gaussian approach for now.
+
+The ANOVA table is as follows
+```{r}
+three_way <- Anova(mod.1, type=3)
+
+
+get_anova_table(three_way)
+
+
+summary(mod.1)
+
+```
+Mixed effect Anova demonstrated that there was a significant three-way interaction between audience size, roomsize and valence score, p < .001. 
+
+## 2.1. Exploring the 3-way interaction
+
+The significant 3-way interaction is visualised below
+```{r}
+library(hrbrthemes)
+library(viridis)
+p <- ggplot(SurveyData, aes(Valence, Score, color = Audiencesize, group = Audiencesize))
+
+
+g1 <- ggplot(SurveyData, aes(Valence, Score, fill = Audiencesize)) +
+  stat_summary(fun = mean, geom = "bar", position = "dodge", stat = "identity") +
+  labs(x="Audience Engagement", y = "Anxiety Level", 
+       title="Fig 3. Three-way interaction between Room size, Audience size and Audience engagement",
+      color="Audience Size") +
+  theme_ipsum(axis_title_size = 12, caption_size = 12) + 
+  facet_wrap(~ Roomsize)
+
+g1
+
+
+```
+
+## 2.1.1 Roomsize
+
+Breaking the effects down by `Roomsize` gives
+```{r}
+two_way <- joint_tests(mod.1, by = "Roomsize", adjust="holm")
+two_way
+
+```
+
+```{r}
+two.way <- SurveyData %>%
+  group_by(Roomsize) %>%
+  anova_test(dv = Score, wid = Subject, within = c(Audiencesize, Valence))
+two.way
+get_anova_table(two.way)
+```
+
+This suggests that for both `Roomsize=Seminar` and `Roomsize=Classroom`, there was a significant two way interaction between `Valence` * `Audiencesize` (p = .012), `Valence` * `PRCS` (p < .001), and `Audiencesize` * `PRCS` (p < .001). For the `Roomsize=Lecture` only the level of `Valence` * `PRCS` (p = .001) showed significant interaction.
+
+
+Testing the levels of `Audiencesize` within `Roomsize=Lecture` reveals
+```{r}
+emm.1 <- emmeans(mod.1, pairwise ~ Audiencesize | Roomsize, adjust="holm")
+emm.1$contrasts[4:6]
+```
+For both `Roomsize=Classroom` and `Roomsize=Seminar` we need to breakdown the `Valence x Audiencesize` interaction. 
+```{r}
+emm.2 <- as.data.frame(joint_tests(mod.1, by = c("Audiencesize","Roomsize"), p.adjust="holm"))
+emm.2[-4:-6,]
+```
+
+For the classroom only the small and medium audience sizes led to a difference in anxiety scores across the different valences, whereas the large audience size showed no effect of valence. For the seminar room, the effect was the opposite as the large audience size was associated with anxiety scores that differed depending upon valence, whereas both medium and small showed no effect of valence.
+
+We can examine the final pairwise comparisons across levels of valence within each level of `Audiencesize` for each of `Roomsize=Classroom` and `Roomsize=Seminar` below
+
+
+```{r}
+emm.3 <- emmeans(mod.1, pairwise ~ Valence|Audiencesize:Roomsize, adjust="holm")
+emm.3$contrasts[c(-1:-3,-10:-27),]
+```
+
+For the classroom the effect of valence at a medium audience size was driven by the negative condition producing significantly smaller anxiety scores than either positive or neutral. The effect of valence at a small audience size was driven both the negative and neutral conditions producing significantly smaller anxiety scores than the positive condition.
+
+```{r}
+emm.3$contrasts[19:21,]
+```
+For the seminar room the effect of valence at the large audience size was driven by the negative condition producing significantly smaller anxiety scores than either positive or neutral, similar to the effect in the classroom of a medium audience size.
+
+
+## 2.1.2 Valence
+```{r}
+emmip(mod.1, Audiencesize ~ Roomsize | Valence, CIs=T)
+```
+
+
+Breaking the effects down by `Valence` gives
+```{r}
+joint_tests(mod.1, by = "Valence", adjust="holm")
+```
+For `Valence = Negative`, the level of `Audiencesize` and `Roomsize` made a difference to the anxiety scores；for both `Valence = Neutral` and `Valence = Positive` there was a significant interaction between `Audiencesize` and `Roomsize`.
+
+
+Testing the levels of `Audiencesize`/`Roomsize` within `Valence = Negative` reveals that each level of `Audiencesize`/`Roomsize` is significantly different from the other. Based on the plot above we can conclude that the anxiety score increased as the `Audiencesize`/`Roomsize` got larger.
+
+```{r}
+emm.v1 <- emmeans(mod.1, pairwise ~ Audiencesize | Valence, adjust="holm")
+emm.v1$contrasts[1:3]
+
+emm.v2 <- emmeans(mod.1, pairwise ~ Roomsize | Valence, adjust="holm")
+emm.v2$contrasts[1:3]
+```
+
+Breakdown the `Audiencesize x Roomsize` interaction for both `Valence = Neutral` and `Valence = Positive`. The results indicating that for `Valence = Neutral` and `Valence = Positive`, `Audience sizes` led to a difference in anxiety scores across the different `Roomsize`.
+
+```{r}
+emm.v3 <- as.data.frame(joint_tests(mod.1, by = c("Audiencesize","Valence"), p.adjust="holm"))
+
+emm.v3[-1:-3, ]
+```
+Finally, examine the  pairwise comparisons across levels of `Audiencesize` within each level of `Roomsize` for `Valence = Neutral` and `Valence = Positive`.
+
+For the `Valence = Neutral/Positive`, the effect of `Audiencesize` at `Roomsize` was driven by the small audience size producing significantly lower anxiety scores than either medium or large.
+
+```{r}
+
+emm.v4 <- emmeans(mod.1, pairwise ~ Audiencesize|Roomsize:Valence, adjust="holm")
+
+emm.v4$contrasts[10:27,]
+```
+
+
+## 2.1.3 Audiencesize
+
+
+```{r}
+emmip(mod.1, Roomsize ~ Valence | Audiencesize, CIs=T)
+```
+
+
+Breaking the effects down by `Audiencesize` gives
+```{r}
+joint_tests(mod.1, by = "Audiencesize", adjust="holm")
+```
+
+This suggests that for all `Audiencesize`, there was a significant interaction between `Valence` and `Roomsize`.
+
+To breakdown the `Valence x Roomsize` interaction. 
+```{r}
+emm.a1 <- as.data.frame(joint_tests(mod.1, by = c("Valence","Audiencesize"), p.adjust="holm"))
+emm.a1
+```
+
+For all `Audiencesize`, `Valence` led to a significant difference in anxiety scores across different `Roomsize`.
+
+Then examine the pairwise comparisons across levels of `Valence` within each level of `Audiencesize` for each of `Roomsize`.
+
+```{r}
+emm.a2 <- emmeans(mod.1, pairwise ~ Valence|Roomsize:Audiencesize, adjust="holm")
+
+emm.a2$contrasts[1:9,]
+
+```
+
+For the `Audiencesize = Small`, the effect of valence at `Roomsize = class` was driven by the `negative` condition producing significantly lower anxiety scores than both `Neutral` and `Positive`. 
+
+```{r}
+emm.a2$contrasts[10:18,]
+
+```
+For the `Audiencesize = Medium`, the effect of valence at `Roomsize = class` was driven by the `negative` condition producing significantly lower anxiety scores than both `Neutral` and `Positive`. 
+
+```{r}
+emm.a2$contrasts[19:27,]
+
+```
+For the `Audiencesize = Large`, the effect of `Valence` at `Roomsize = Seminar` was driven by the `negative` condition producing significantly lower anxiety scores than both `Neutral` and `Positive`. 
+
+
+________
+
+
+
+## 2.2. Principle Factor Analysis
+
+```{r}
+# https://rkabacoff.github.io/factorAnalysis/articles/factorAnalysis.html
+library(psych)
+library(qacDR)
+
+# data
+
+paf_data<- temp1 %>% select(LargeNeutralAudience_Classroom,MediumNeutralAudience_Classroom, SmallNeutralAudience_Classroom,
+                          LargeDisengagedAudience_Classroom,LargeEngagedAudience_Classroom,
+                          MediumDisengagedAudience_Classroom,
+                          MediumEngagedAudience_Classroom,SmallDisengagedAudience_Classroom,SmallEngagedAudience_Classroom,
+                          LargeDisengagedAudience_Lecture,LargeEngagedAudience_Lecture,
+                          MediumDisengagedAudience_Lecture,MediumEngagedAudience_Lecture,
+                          SmallDisengagedAudience_Lecture,
+                          SmallEngagedAudience_Lecture,LargeDisengagedAudience_InterviewRoom,
+                          LargeEngagedAudience_InterviewRoom,
+                          MediumDisengagedAudience_InterviewRoom,MediumEngagedAudience_InterviewRoom,
+                          SmallDisengagedAudience_InterviewRoom,
+                          SmallEngagedAudience_InterviewRoom,LargeNeutralAudience_Lecture,
+                          MediumNeutralAudience_Lecture,
+                          SmallNeutralAudience_Lecture,LargeNeutralAudience_InterviewRoom,MediumNeutralAudience_InterviewRoom,
+                          SmallNeutralAudience_InterviewRoom)
+
+paf_data <- as.tibble(paf_data)
+
+
+# screeplot
+
+
+ev <- eigen(cor(paf_data)) 
+ap <- parallel(subject=nrow(paf_data),var=ncol(paf_data),
+  rep=100,cent=.05)
+nS <- nScree(x=ev$values, aparallel=ap$eigen$qevpea)
+plotnScree(nS)
+
+
+
+# principle axis facot
+
+paf<-fa(paf_data,nfactors = 3,rotate="varimax",fm="pa",score=T)
+
+fit.fa <- FA(paf_data, nfactor=3, rotate="varimax", fm="pa")
+
+paf$loadings
+# diagram
+
+fa.graph(paf)
+fa.diagram(paf,simple = TRUE)
+g2 <- plot(fit.fa, sort=TRUE)
+g2t <- plot(fit.fa, sort=TRUE, type = "table")
+plot(paf, sort=TRUE)
+g2
+g2t
+  
+
+
+
+
+# add the component scores to the original data.
+
+dat1 <- score(dat1, fit.fa)
+head(dat1)
+```
+
+
+## SEM(Simple CFA Model)
+```{r}
+
+
+library(sem)
+surveydat.cov <- cov(SurveyData)
+model.mydata <- specify.model()
+
+
+mydata.sem <- sem(model.mydata, mydata.cov, nrow(mydata))
+# print results (fit indices, paramters, hypothesis tests)
+summary(mydata.sem)
+# print standardized coefficients (loadings)
+std.coef(mydata.sem)
+
+```
+
+
+
+## 3 Multiregression
+
+```{r}
+# recode data
+library(forcats)
+dat1 <- SurveyData
+ha <- dat1[which(dat1$PRCS > 6), ]
+la <- dat1[which(dat1$PRCS <= 6), ]
+
+dat1$Gender <- fct_recode(dat1$Gender,
+  "Male" = "0",
+  "Female" = "1")
+
+# catagory to numeric
+
+
+dat1$Employment <- factor(dat1$Employment, levels = c("Full-Time", "Part-time", "Student", "Unemployed", "Other (please specify)"))
+dat1$Employment <- as.numeric(dat1$Employment)
+
+dat1$Education <- factor(dat1$Education, levels = c("Elementary", "High school","College","Bachelors or equivalent","Masters or equivalent","Doctoral or equivalent"))
+dat1$Education <- as.numeric(dat1$Education)
+
+----
+
+dat1$Employment <- fct_recode(dat1$Employment,
+                              "Full-Time" = "0",
+                              "Part-time" = "1",
+                              "Student" = "2",
+                              "Unemployed" = "3",
+                              "Other (please specify)" = "4")
+
+dat1$Education <- fct_recode(dat1$Education,
+                             "Elementary" = "0",
+                              "High school" = "1",
+                              "College" = "2",
+                             "Bachelors or equivalent" = "3",
+                             "Masters or equivalent" = "4",
+                             "Doctoral or equivalent" = "5")
+
+
+
+fit1 <- lm(Score ~ F1 + F2 + F3 + Age + Gender + Employment + Education + BFNE + PRCS + SSPS,data = dat1)
+fith <- lm(Score ~ F1 + F2 + F3 + Age + Gender + Employment + Education + BFNE + PRCS + SSPS, data = ha)
+fitl <- lm(Score ~ F1 + F2 + F3 + Age + Gender + Employment + Education + BFNE + PRCS + SSPS, data = la)
+summary(fit1)
+summary(fith)
+summary(fitl)
+
+## AIC 
+step(fit1)
+
+#report 
+report_model(fit1)
+report_performance(fit1)
+report_statistics(fit1)
+report_table(fit1) 
+
+```
+
+
+
