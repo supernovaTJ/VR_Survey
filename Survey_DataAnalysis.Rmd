@@ -1,0 +1,95 @@
+---
+title: "Survey_Data_Analysis"
+author: "Tingjun"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---
+title: "VR Online Survey Data Analyse Script"
+author: "Tingjun"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#1 Load Packages
+```{r}
+# data 
+library(readxl)
+library(tidyverse)
+
+#Linear mixed effect model
+library(lme4) 
+#post-hoc test in LMM
+library(emmeans) 
+library(lmerTest)
+
+```
+
+#2 Data Cleaning
+
+Extract, rename and combine the variables to produce the final dataset. 
+ 
+```{r}
+
+dat <- read_xlsx("data.xlsx")
+
+
+temp0 <- dat %>% mutate(BFNE = BFNE_1 + BFNE_2 + BFNE_3 + BFNE_4 + BFNE_5 + BFNE_6 +
+                               BFNE_7 + BFNE_8 + BFNE_9 + BFNE_10 + BFNE_11 + BFNE_12,
+                        PRCS = PRCS_1 + PRCS_2 + PRCS_3 + PRCS_4 + PRCS_5 + PRCS_6 +
+                               PRCS_7 + PRCS_8 + PRCS_9 + PRCS_10 + PRCS_11 + PRCS_12,
+                        SSPS = SSPSN_1 + SSPSN_2 + SSPSN_3 + SSPSN_4 + SSPSN_5)
+
+temp1 <- temp0 %>% select(Subject,Gender,Employment,Age,Education,
+                          LargeNeutralAudience_Classroom,MediumNeutralAudience_Classroom, SmallNeutralAudience_Classroom,
+                          LargeDisengagedAudience_Classroom,LargeEngagedAudience_Classroom,
+                          MediumDisengagedAudience_Classroom,
+                          MediumEngagedAudience_Classroom,SmallDisengagedAudience_Classroom,SmallEngagedAudience_Classroom,
+                          LargeDisengagedAudience_Lecture,LargeEngagedAudience_Lecture,
+                          MediumDisengagedAudience_Lecture,MediumEngagedAudience_Lecture,
+                          SmallDisengagedAudience_Lecture,
+                          SmallEngagedAudience_Lecture,LargeDisengagedAudience_InterviewRoom,
+                          LargeEngagedAudience_InterviewRoom,
+                          MediumDisengagedAudience_InterviewRoom,MediumEngagedAudience_InterviewRoom,
+                          SmallDisengagedAudience_InterviewRoom,
+                          SmallEngagedAudience_InterviewRoom,LargeNeutralAudience_Lecture,
+                          MediumNeutralAudience_Lecture,
+                          SmallNeutralAudience_Lecture,LargeNeutralAudience_InterviewRoom,MediumNeutralAudience_InterviewRoom,
+                          SmallNeutralAudience_InterviewRoom,BFNE,PRCS,SSPS)
+
+SurveyData <- temp1 %>% gather(key=var1, value="Score",- Subject, - Gender,- Employment,- Age, - Education,
+                               - BFNE, - PRCS, - SSPS)                                              %>%     
+                        mutate(Roomsize=ifelse(grepl("Class",var1),"Classroom", 
+                                               ifelse(grepl("Lecture",var1),"Lecture","InterviewRoom")))  %>%
+                        mutate(Audiencesize=ifelse(grepl("Large",var1),"Large", 
+                                                   ifelse(grepl("Medium",var1),"Medium","Small")))  %>% 
+                        mutate(Valence=ifelse(grepl("Engaged",var1),"Engaged",
+                                              ifelse(grepl("Disengaged",var1),"Disengaged","Neutral")))        %>%
+                        mutate(Roomsize=as.factor(Roomsize), Audiencesize=as.factor(Audiencesize), 
+                               Valence=as.factor(Valence))                                          %>% 
+                        select(-var1)
+
+SurveyData <- as.tibble(SurveyData)
+
+# re-level factors
+SurveyData$Roomsize <- factor(SurveyData$Roomsize, levels = c("InterviewRoom", "Classroom", "Lecture"))
+
+SurveyData$Valence <- factor(SurveyData$Valence, levels = c("Disengaged", "Neutral", "Engaged"))
+
+SurveyData$Audiencesize <- factor(SurveyData$Audiencesize, levels = c("Small", "Medium", "Large"))
+
+```
+
+# 1.1 Testing for Normality Assumption
+
+```{r}
+
+```
+
