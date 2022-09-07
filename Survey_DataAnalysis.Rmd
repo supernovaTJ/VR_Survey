@@ -1,43 +1,58 @@
 ---
 title: "Survey_Data_Analysis"
 author: "Tingjun"
-output: html_document
+output: 
+  html_document:
+    highlight: tango
+    toc_depth: 3 
+    number_sections: true 
+    theme: journal
+    toc: true 
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
----
-title: "VR Online Survey Data Analyse Script"
-author: "Tingjun"
-output: html_document
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-#1 Load Packages
+# 1 Load Packages
 ```{r}
-# data 
+# Data Manipulation
 library(readxl)
 library(tidyverse)
+# Data Visualisation
+library(sjPlot) #Data Visualization for Statistics in Social Science
+library(huxtable) # A package for creating text tables https://hughjonesd.github.io/huxtable/huxtable.html
+library(gtsummary) # provides an elegant and flexible way to create publication-ready analytical and summary tables. https://www.danieldsjoberg.com/gtsummary/
+library(flextable) # provides a framework for easily create tables for reporting and publications. https://ardata-fr.github.io/flextable-book/
+library(hrbrthemes)
+library(viridis)
+library(ggpubr)
+library(report)
 
-#Linear mixed effect model
+# Data Analysis
+library(rstatix) #Pipe-Friendly Framework for Basic Statistical Tests
+library(survey)  # Analysis of Complex Survey Samples https://www.rdocumentation.org/packages/survey/versions/4.1-1
+library(jtools) # This is a collection of tools for more efficiently understanding and sharing the results of (primarily) regression analyses https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+library(psych) # https://www.rdocumentation.org/packages/psych/versions/2.2.5
+library(afex)
+library(qacDR) # https://rkabacoff.github.io/factorAnalysis/articles/factorAnalysis.html
+
+# Linear mixed effect model
 library(lme4) 
-#post-hoc test in LMM
+
+# post-hoc test in LMM
 library(emmeans) 
 library(lmerTest)
 
 ```
 
-#2 Data Cleaning
+## 1.1 Data Manipulation
 
 Extract, rename and combine the variables to produce the final dataset. 
  
 ```{r}
 
+# Data cleaning
 dat <- read_xlsx("data.xlsx")
 
 
@@ -78,7 +93,7 @@ SurveyData <- temp1 %>% gather(key=var1, value="Score",- Subject, - Gender,- Emp
 
 SurveyData <- as.tibble(SurveyData)
 
-# re-level factors
+# Re-level factors
 SurveyData$Roomsize <- factor(SurveyData$Roomsize, levels = c("InterviewRoom", "Classroom", "Lecture"))
 
 SurveyData$Valence <- factor(SurveyData$Valence, levels = c("Disengaged", "Neutral", "Engaged"))
@@ -87,9 +102,209 @@ SurveyData$Audiencesize <- factor(SurveyData$Audiencesize, levels = c("Small", "
 
 ```
 
-# 1.1 Testing for Normality Assumption
+
+
+# 2 Mixed Effect Anova
+
+First set the default coding scheme to "sum" so that Type III tests are correctly calculated.
+```{r}
+options(contrasts=c("contr.sum","contr.poly"))
+```
+
+## 2.1 LMEM model
+
+Fit the full factorial model of Audience x Room x Valence for the anxiety scores. With subject as the random factor as we have no repeats per-subject within each cell.
 
 ```{r}
+mod.1 <- lmer(Score ~ Audiencesize * Roomsize * Valence + (1|Subject), data = SurveyData)
+summary(mod.1)
+```
+
+### 2.1.1 Testing for Normality Assumption
+
+```{r}
+# Compute Shapiro-Wilk test for each combinations of factor levels
+SurveyData %>%
+  group_by(Audiencesize, Valence, Roomsize) %>%
+  shapiro_test(Score)
+
+# Create QQ plot for each cell of design
+ggqqplot(SurveyData, "Score", ggtheme = theme_bw()) +
+  facet_grid(Audiencesize + Valence ~ Roomsize, labeller = "label_both")
+
+# Homogneity of variance assumption
+## Compute the Levene’s test after grouping the data by Audiencesize and Valence categories
+SurveyData %>%
+  group_by(Audiencesize, Valence) %>%
+  levene_test(Score ~ Roomsize)
+```
+
+### 2.1.2 Descriptive stats
+```{r}
+Survey_desc <- SurveyData %>% select(Age, Gender, Education, Employment)
+tbl_desc <- tbl_summary(Survey_desc)
+tbl_desc
+```
+
+
+## 2.2 Three-way interaction
+
+### 2.2.1 Visualising the 3-way interaction
+
+```{r}
+# Bar plot
+g0 <- ggplot(SurveyData, aes(Valence, Score, fill = Audiencesize)) +
+            facet_wrap(~ Roomsize)
+
+g1 <- g0 + stat_summary(fun = mean, geom = "bar", position = "dodge", stat = "identity")
+
+# boxplot
+bxp <- ggboxplot(
+  SurveyData, x = "Valence", y = "Score",
+  color = "Audiencesize", palette = "grey",
+  facet.by = "Roomsize", short.panel.labs = FALSE
+  )
+
+# Annotate
+g2 <-  g1 + labs(x="Audience Engagement", y = "Anxiety Level", 
+       fill ="Audience Size") +
+       theme_ipsum() +
+       scale_fill_grey(start = 0.40, end = 0.6)
+
+# model interaction
+g_inter <-emmip(mod.1, Audiencesize ~ Valence | Roomsize, CIs=T)
+
+# Print
+g2
+g_inter
+bxp
+```
+
+### 2.2.2 Three-way interaction
+```{r}
+
+three_way <- anova(mod.1, type=3)
+get_anova_table(three_way)
+```
+
+Mixed effect Anova demonstrated that there was a significant three-way interaction between room size, audience size, and audience engagement, p < 0.001
+
+### 2.2.3 Simple two-way interaction by Roomsize
+
+```{r}
+two_way <- joint_tests(mod.1, by = "Roomsize", adjust="holm")
+two_way
+```
+A two-way interaction between audience engagement * audience size was found in the interview room (p < .005) and classroom (p < .001) settings.
+
+### 2.2.4 Simple Mian Effects
+
+For both `Roomsize = Interview Room` and `Roomsize = Classroom` and , we need to breakdown the `Valence x Audiencesize` interaction. 
+#### Two way
+```{r}
+emm.twoway <- as.data.frame(joint_tests(mod.1, by = c("Audiencesize","Roomsize"), p.adjust="holm"))
+emm.twoway[-7:-9, ]
+```
+For the `Roomsize = Interview Room`, only the large audience size was associated with anxiety scores that differed depending upon audience engagement condition, whereas both medium and small showed no effect of audience engagement condition.
+
+For the `Roomsize = Classroom`, the effect was opposite as the small and medium audience sizes led to a difference in anxiety scores across the different valences, whereas the large audience size showed no effect of audience engagement condition.
+
+### 2.2.5 Simple Simple Mian Effects
+```{r}
+# Interview room
+emm.final <- emmeans(mod.1, pairwise ~ Valence|Audiencesize:Roomsize, adjust="holm")
+emm.interview <- emm.final$contrasts[7:9,]
+emm.interview
+```
+When participants were presented in the `interview room`, the large, disengaged audience led to significantly lower anxiety scores than either neutral (p < .001) or positively engaged condition (p = .008) (Fig 3. Interview room panel).
+
+#### Classroom
+```{r}
+emm.classroom <-emm.final$contrasts[10:15,]
+emm.classroom
+```
+In the classroom scenario, the effect of audience engagement at a small audience size was driven by both the disengaged (p = 0.004) and neutral (p < 0.001) conditions producing significantly smaller anxiety scores than the positively engaged condition. When audience size was medium, significantly lower anxiety scores were seen for the disengaged audience than either neutral (p = 0.006) or positively engaged (p = 0.001) (Fig 3. Classroom panel).
+
+
+Testing the levels of `Audiencesize` within `Roomsize=Lecture` reveals
+```{r}
+emm.lecture <- emmeans(mod.1, pairwise ~ Audiencesize | Roomsize, adjust="holm")
+emm.lecture$contrasts[7:9]
+```
+
+In the lecture scenario, the perceived anxiety score significantly increased as the audience size increased (p < 0.001
+
+
+# 3 Factor Analysis
+## 3.1 Principle axis factor
+### 3.1.1 Data
+```{r}
+paf_data<- temp1 %>% 
+           select(LargeNeutralAudience_Classroom,MediumNeutralAudience_Classroom,    
+                  SmallNeutralAudience_Classroom,LargeDisengagedAudience_Classroom,
+                  LargeEngagedAudience_Classroom,MediumDisengagedAudience_Classroom,
+                  MediumEngagedAudience_Classroom,SmallDisengagedAudience_Classroom,
+                  SmallEngagedAudience_Classroom,LargeDisengagedAudience_Lecture,
+                  LargeEngagedAudience_Lecture,MediumDisengagedAudience_Lecture,
+                  SmallEngagedAudience_Lecture,LargeDisengagedAudience_InterviewRoom,
+                  LargeEngagedAudience_InterviewRoom,
+                  MediumDisengagedAudience_InterviewRoom,MediumEngagedAudience_InterviewRoom,
+                  SmallDisengagedAudience_InterviewRoom,
+                  SmallEngagedAudience_InterviewRoom,LargeNeutralAudience_Lecture,
+                  MediumNeutralAudience_Lecture,
+                  SmallNeutralAudience_Lecture,LargeNeutralAudience_InterviewRoom,
+                  MediumNeutralAudience_InterviewRoom,SmallNeutralAudience_InterviewRoom)
+
+KMO(paf_data)
+```
+### 3.1.2 Screeplot
+```{r}
+scree_plot(paf_data)
+```
+## 3.2 Principle Axis Factor
+```{r}
+fit.fa <- FA(paf_data, nfactor=3, rotate="varimax", fm="pa")
+paf<-fa(paf_data,nfactors = 3,rotate="varimax",fm="pa",score=T)
+```
+
+## 3.2.1 Diagram
+
+```{r}
+fa.diagram(paf,simple = TRUE)
+fa.bar <- plot(fit.fa, sort=TRUE) # plot factor pattern as bar chart
+fa.bar
+
+# add the component scores to the original data.
+regr_dat <- SurveyData
+regr_dat <- score(regr_dat, fit.fa)
+head(regr_dat)
+```
+## 4 Multiregression
+
+```{r}
+# Subset participants into high & low anxiety measure
+
+regr_h <- regr_dat[which(regr_dat$PRCS > 6), ]
+regr_l <- regr_dat[which(regr_dat$PRCS <= 6), ]
+
+
+fit.1<- lm(Score ~ F1 + F2 + F3 + Age + Gender + Employment + Education + BFNE + PRCS + SSPS,data = regr_dat)
+fit.h <- lm(Score ~ F1 + F2 + F3 + Age + Gender + Employment + Education + BFNE + PRCS + SSPS, data = regr_h)
+fit.l <- lm(Score ~ F1 + F2 + F3 + Age + Gender + Employment + Education + BFNE + PRCS + SSPS, data = regr_l)
+summ(fit.1)
+summ(fit.h)
+summ(fit.l)
+
+vif(model.regr)
+## AIC 
+model.regr <- step(fit.1)
+summ(model.regr)
+
+#report 
+report_table(model.regr) 
 
 ```
+
+```
+
 

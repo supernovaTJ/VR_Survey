@@ -6,6 +6,7 @@ title: "Survey Analysis"
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
+
 ## 1.Data Import
 
 Load the required packages for the analysis and import the raw data.
@@ -159,13 +160,6 @@ two_way
 
 ```
 
-```{r}
-two.way <- SurveyData %>%
-  group_by(Roomsize) %>%
-  anova_test(dv = Score, wid = Subject, within = c(Audiencesize, Valence))
-two.way
-get_anova_table(two.way)
-```
 
 This suggests that for both `Roomsize=Seminar` and `Roomsize=Classroom`, there was a significant two way interaction between `Valence` * `Audiencesize` (p = .012), `Valence` * `PRCS` (p < .001), and `Audiencesize` * `PRCS` (p < .001). For the `Roomsize=Lecture` only the level of `Valence` * `PRCS` (p = .001) showed significant interaction.
 
@@ -181,7 +175,7 @@ emm.2 <- as.data.frame(joint_tests(mod.1, by = c("Audiencesize","Roomsize"), p.a
 emm.2[-4:-6,]
 ```
 
-For the classroom only the small and medium audience sizes led to a difference in anxiety scores across the different valences, whereas the large audience size showed no effect of valence. For the seminar room, the effect was the opposite as the large audience size was associated with anxiety scores that differed depending upon valence, whereas both medium and small showed no effect of valence.
+For the seminar room, only the large audience size was associated with anxiety scores that differed depending upon valence, whereas both medium and small showed no effect of valence. For the classroom, the effect was opposite as the small and medium audience sizes led to a difference in anxiety scores across the different valences, whereas the large audience size showed no effect of valence. 
 
 We can examine the final pairwise comparisons across levels of valence within each level of `Audiencesize` for each of `Roomsize=Classroom` and `Roomsize=Seminar` below
 
@@ -197,95 +191,6 @@ For the classroom the effect of valence at a medium audience size was driven by 
 emm.3$contrasts[19:21,]
 ```
 For the seminar room the effect of valence at the large audience size was driven by the negative condition producing significantly smaller anxiety scores than either positive or neutral, similar to the effect in the classroom of a medium audience size.
-
-
-## 2.1.2 Valence
-```{r}
-emmip(mod.1, Audiencesize ~ Roomsize | Valence, CIs=T)
-```
-
-
-Breaking the effects down by `Valence` gives
-```{r}
-joint_tests(mod.1, by = "Valence", adjust="holm")
-```
-For `Valence = Negative`, the level of `Audiencesize` and `Roomsize` made a difference to the anxiety scores；for both `Valence = Neutral` and `Valence = Positive` there was a significant interaction between `Audiencesize` and `Roomsize`.
-
-
-Testing the levels of `Audiencesize`/`Roomsize` within `Valence = Negative` reveals that each level of `Audiencesize`/`Roomsize` is significantly different from the other. Based on the plot above we can conclude that the anxiety score increased as the `Audiencesize`/`Roomsize` got larger.
-
-```{r}
-emm.v1 <- emmeans(mod.1, pairwise ~ Audiencesize | Valence, adjust="holm")
-emm.v1$contrasts[1:3]
-
-emm.v2 <- emmeans(mod.1, pairwise ~ Roomsize | Valence, adjust="holm")
-emm.v2$contrasts[1:3]
-```
-
-Breakdown the `Audiencesize x Roomsize` interaction for both `Valence = Neutral` and `Valence = Positive`. The results indicating that for `Valence = Neutral` and `Valence = Positive`, `Audience sizes` led to a difference in anxiety scores across the different `Roomsize`.
-
-```{r}
-emm.v3 <- as.data.frame(joint_tests(mod.1, by = c("Audiencesize","Valence"), p.adjust="holm"))
-
-emm.v3[-1:-3, ]
-```
-Finally, examine the  pairwise comparisons across levels of `Audiencesize` within each level of `Roomsize` for `Valence = Neutral` and `Valence = Positive`.
-
-For the `Valence = Neutral/Positive`, the effect of `Audiencesize` at `Roomsize` was driven by the small audience size producing significantly lower anxiety scores than either medium or large.
-
-```{r}
-
-emm.v4 <- emmeans(mod.1, pairwise ~ Audiencesize|Roomsize:Valence, adjust="holm")
-
-emm.v4$contrasts[10:27,]
-```
-
-
-## 2.1.3 Audiencesize
-
-
-```{r}
-emmip(mod.1, Roomsize ~ Valence | Audiencesize, CIs=T)
-```
-
-
-Breaking the effects down by `Audiencesize` gives
-```{r}
-joint_tests(mod.1, by = "Audiencesize", adjust="holm")
-```
-
-This suggests that for all `Audiencesize`, there was a significant interaction between `Valence` and `Roomsize`.
-
-To breakdown the `Valence x Roomsize` interaction. 
-```{r}
-emm.a1 <- as.data.frame(joint_tests(mod.1, by = c("Valence","Audiencesize"), p.adjust="holm"))
-emm.a1
-```
-
-For all `Audiencesize`, `Valence` led to a significant difference in anxiety scores across different `Roomsize`.
-
-Then examine the pairwise comparisons across levels of `Valence` within each level of `Audiencesize` for each of `Roomsize`.
-
-```{r}
-emm.a2 <- emmeans(mod.1, pairwise ~ Valence|Roomsize:Audiencesize, adjust="holm")
-
-emm.a2$contrasts[1:9,]
-
-```
-
-For the `Audiencesize = Small`, the effect of valence at `Roomsize = class` was driven by the `negative` condition producing significantly lower anxiety scores than both `Neutral` and `Positive`. 
-
-```{r}
-emm.a2$contrasts[10:18,]
-
-```
-For the `Audiencesize = Medium`, the effect of valence at `Roomsize = class` was driven by the `negative` condition producing significantly lower anxiety scores than both `Neutral` and `Positive`. 
-
-```{r}
-emm.a2$contrasts[19:27,]
-
-```
-For the `Audiencesize = Large`, the effect of `Valence` at `Roomsize = Seminar` was driven by the `negative` condition producing significantly lower anxiety scores than both `Neutral` and `Positive`. 
 
 
 ________
